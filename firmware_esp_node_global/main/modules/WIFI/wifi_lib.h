@@ -71,6 +71,8 @@ void wifi_init_sta(void);
  * 
 */
 
+void wifi_stack_init(void);
+
 /**
  * @brief loop de conexion, usa las credenciales en esp_wifi.ssid/pswd
  *        bloquea hasta conectarse exitosamente

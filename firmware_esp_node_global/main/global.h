@@ -9,10 +9,11 @@
 
 #define TRUE 1
 #define FALSE 0
-#define UART_MAIN UART_NUM_1
+#define UART_MAIN UART_NUM_0
 
-#define UART_TX_PIN  17
-#define UART_RX_PIN  16
+//seran necesario, por ahora quitamos esto de uart, mientras que comodamos todo el ESP  
+// #define UART_TX_PIN  17
+// #define UART_RX_PIN  16
 
 // IP del broker MQTT, se llenara cuando la Raspberry la mande
 extern char broker_ip[64];

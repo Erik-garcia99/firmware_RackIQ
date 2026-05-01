@@ -1,118 +1,262 @@
-#include<string.h>
+// #include<string.h>
 
 
-#include <freertos/FreeRTOS.h> 
-#include<freertos/task.h>
-#include<freertos/event_groups.h>
+// #include <freertos/FreeRTOS.h> 
+// #include<freertos/task.h>
+// #include<freertos/event_groups.h>
 
 
 
-#include<esp_log.h>
-#include<esp_event.h>
-#include <esp_err.h>
+// #include<esp_log.h>
+// #include<esp_event.h>
+// #include <esp_err.h>
 
-#include<esp_wifi.h>
-#include<nvs_flash.h>
-#include<lwip/err.h>
-#include<lwip/sys.h>
+// #include<esp_wifi.h>
+// #include<nvs_flash.h>
+// #include<lwip/err.h>
+// #include<lwip/sys.h>
 
-//librerias propias 
-#include"wifi_lib.h"
-#include"global.h"
+// //librerias propias 
+// #include"wifi_lib.h"
+// #include"global.h"
 
-static void wifi_event_handler(void *args, esp_event_base_t event_base,int32_t event_id, void *event_data);
-
-
-//varibales globales 
-static int s_retry_num;
+// static void wifi_event_handler(void *args, esp_event_base_t event_base,int32_t event_id, void *event_data);
 
 
-// void wifi_init_sta(void){
+// //varibales globales 
+// static int s_retry_num;
+
+
+// // void wifi_init_sta(void){
     
-//     // if(wifi_initialized){
-//     //     ESP_LOGW(TAG, "WIFI ya inicalizado ");
-//     //     wifi_disconnect();
-//     // }
+// //     // if(wifi_initialized){
+// //     //     ESP_LOGW(TAG, "WIFI ya inicalizado ");
+// //     //     wifi_disconnect();
+// //     // }
 
-//     // s_wifi_event_group = xEventGroupCreate();
+// //     // s_wifi_event_group = xEventGroupCreate();
+
+// //     ESP_ERROR_CHECK(esp_netif_init());
+
+// //     ESP_ERROR_CHECK(esp_event_loop_create_default());
+// //     esp_netif_create_default_wifi_sta();
+
+// //     //configutracion por defecto de WIFI
+// //     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+// //     ESP_ERROR_CHECK(esp_wifi_init(&cfg));
+
+// //     //vamos a registrar los eventos que pasen cuando se intente conectar al WIFI y el importantes que el ESP obtenga una IP para poder conextarse a internet
+// //     esp_event_handler_instance_t instance_any_id;
+// //     esp_event_handler_instance_t instance_got_ip;
+
+// //     ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &wifi_event_handler, NULL, &instance_any_id));
+// //     ESP_ERROR_CHECK(esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &wifi_event_handler, NULL, &instance_got_ip));
+
+// //     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
+// //     ESP_ERROR_CHECK(esp_wifi_start()); 
+
+// //     //ahora viene lo bueno. 
+// //     EventBits_t bits;
+// //     //indicamos que si la conexion es diferente a 1 (diferente a una conexion de emprea) entonces entra aqui
+// //     if(esp_wifi.type_connected != 1){
+
+// //         xEventGroupClearBits(s_wifi_event_group, WIFI_CONNECTED_BIT | WIFI_FAIL_BIT);
+// //         s_retry_num = 0; 
+
+// //         //creo que seria con un DO-while que lo este intentando hasta se logre conectar con exito 
+// //         do{
+// //             wifi_config_t wifi_config = {
+// //                 .sta = {
+// //                     .threshold.authmode = WIFI_AUTH_WPA2_PSK,
+// //                 },
+// //             };
+
+// //             strncpy((char*)wifi_config.sta.ssid,     esp_wifi.ssid, sizeof(wifi_config.sta.ssid)-1);
+// //             strncpy((char*)wifi_config.sta.password, esp_wifi.pswd, sizeof(wifi_config.sta.password)-1);
+
+// //             // ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
+
+// //             ////poner esta parte dentro del do-while, para que lo intente al menos 1 vez  hasta que entre correctamnte
+// //             ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
+            
+// //             esp_wifi_connect();
+            
+// //             //avtivamos el bit correspondiente si es que se conecta o falla 
+
+// //             /**
+// //              * hasta este punto se supone va a esperar lo que pase si es que se logro conectar o no 
+// //              * 
+// //             */
+// //             bits = xEventGroupWaitBits(s_wifi_event_group, WIFI_CONNECTED_BIT | WIFI_FAIL_BIT, pdTRUE, pdFALSE, portMAX_DELAY);
+            
+
+// //             if(bits & WIFI_FAIL_BIT){
+// //                 const char *mssg_error = "fallo al establecer conexion con las credenciales actuales\n\0";
+// //                 uart_write_bytes(UART_MAIN, UART_RED, strlen(UART_RED));
+// //                 uart_write_bytes(UART_MAIN, mssg_error, strlen(mssg_error));
+// //                 uart_write_bytes(UART_MAIN, UART_RESET, strlen(UART_RESET));
+                
+// //                 xEventGroupWaitBits(s_wifi_event_group, WIFI_UPDATE, pdTRUE,pdTRUE, portMAX_DELAY);
+
+
+// //             }
+        
+// //         }while(!(bits & WIFI_CONNECTED_BIT)); //el programa sigue hasta el el bit que indica que se conecto no este activo 
+
+// //         esp_wifi.connected = 1; //se estblecio la conexion. 
+// //         const char *mssg_error = "conexion exitoso\n\0";
+// //         uart_write_bytes(UART_MAIN, UART_GREEN, strlen(UART_GREEN));
+// //         uart_write_bytes(UART_MAIN, mssg_error, strlen(mssg_error));
+// //         uart_write_bytes(UART_MAIN, UART_RESET, strlen(UART_RESET));
+// //     }
+// // }
+
+// void wifi_stack_init(void) {
 
 //     ESP_ERROR_CHECK(esp_netif_init());
-
 //     ESP_ERROR_CHECK(esp_event_loop_create_default());
 //     esp_netif_create_default_wifi_sta();
 
-//     //configutracion por defecto de WIFI
 //     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
 //     ESP_ERROR_CHECK(esp_wifi_init(&cfg));
 
-//     //vamos a registrar los eventos que pasen cuando se intente conectar al WIFI y el importantes que el ESP obtenga una IP para poder conextarse a internet
 //     esp_event_handler_instance_t instance_any_id;
 //     esp_event_handler_instance_t instance_got_ip;
-
-//     ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &wifi_event_handler, NULL, &instance_any_id));
-//     ESP_ERROR_CHECK(esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &wifi_event_handler, NULL, &instance_got_ip));
+//     ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID,       &wifi_event_handler, NULL, &instance_any_id));
+//     ESP_ERROR_CHECK(esp_event_handler_instance_register(IP_EVENT,   IP_EVENT_STA_GOT_IP,    &wifi_event_handler, NULL, &instance_got_ip));
 
 //     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
-//     ESP_ERROR_CHECK(esp_wifi_start()); 
-
-//     //ahora viene lo bueno. 
-//     EventBits_t bits;
-//     //indicamos que si la conexion es diferente a 1 (diferente a una conexion de emprea) entonces entra aqui
-//     if(esp_wifi.type_connected != 1){
-
-//         xEventGroupClearBits(s_wifi_event_group, WIFI_CONNECTED_BIT | WIFI_FAIL_BIT);
-//         s_retry_num = 0; 
-
-//         //creo que seria con un DO-while que lo este intentando hasta se logre conectar con exito 
-//         do{
-//             wifi_config_t wifi_config = {
-//                 .sta = {
-//                     .threshold.authmode = WIFI_AUTH_WPA2_PSK,
-//                 },
-//             };
-
-//             strncpy((char*)wifi_config.sta.ssid,     esp_wifi.ssid, sizeof(wifi_config.sta.ssid)-1);
-//             strncpy((char*)wifi_config.sta.password, esp_wifi.pswd, sizeof(wifi_config.sta.password)-1);
-
-//             // ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
-
-//             ////poner esta parte dentro del do-while, para que lo intente al menos 1 vez  hasta que entre correctamnte
-//             ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
-            
-//             esp_wifi_connect();
-            
-//             //avtivamos el bit correspondiente si es que se conecta o falla 
-
-//             /**
-//              * hasta este punto se supone va a esperar lo que pase si es que se logro conectar o no 
-//              * 
-//             */
-//             bits = xEventGroupWaitBits(s_wifi_event_group, WIFI_CONNECTED_BIT | WIFI_FAIL_BIT, pdTRUE, pdFALSE, portMAX_DELAY);
-            
-
-//             if(bits & WIFI_FAIL_BIT){
-//                 const char *mssg_error = "fallo al establecer conexion con las credenciales actuales\n\0";
-//                 uart_write_bytes(UART_MAIN, UART_RED, strlen(UART_RED));
-//                 uart_write_bytes(UART_MAIN, mssg_error, strlen(mssg_error));
-//                 uart_write_bytes(UART_MAIN, UART_RESET, strlen(UART_RESET));
-                
-//                 xEventGroupWaitBits(s_wifi_event_group, WIFI_UPDATE, pdTRUE,pdTRUE, portMAX_DELAY);
-
-
-//             }
-        
-//         }while(!(bits & WIFI_CONNECTED_BIT)); //el programa sigue hasta el el bit que indica que se conecto no este activo 
-
-//         esp_wifi.connected = 1; //se estblecio la conexion. 
-//         const char *mssg_error = "conexion exitoso\n\0";
-//         uart_write_bytes(UART_MAIN, UART_GREEN, strlen(UART_GREEN));
-//         uart_write_bytes(UART_MAIN, mssg_error, strlen(mssg_error));
-//         uart_write_bytes(UART_MAIN, UART_RESET, strlen(UART_RESET));
-//     }
+//     ESP_ERROR_CHECK(esp_wifi_start());
 // }
 
-void wifi_stack_init(void) {
 
+// void wifi_connect(void) {
+
+//     EventBits_t bits;
+
+//     do {
+//         xEventGroupClearBits(s_wifi_event_group, WIFI_CONNECTED_BIT | WIFI_FAIL_BIT);
+//         s_retry_num = 0;
+
+//         wifi_config_t wifi_config = {
+//             .sta = {
+//                 .threshold.authmode = WIFI_AUTH_WPA2_PSK,
+//             },
+//         };
+//         strncpy((char*)wifi_config.sta.ssid, esp_wifi.ssid, sizeof(wifi_config.sta.ssid)     - 1);
+//         strncpy((char*)wifi_config.sta.password, esp_wifi.pswd, sizeof(wifi_config.sta.password) - 1);
+
+//         ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
+//         esp_wifi_connect();
+
+//         bits = xEventGroupWaitBits(s_wifi_event_group,
+//                                     WIFI_CONNECTED_BIT | WIFI_FAIL_BIT,
+//                                     pdTRUE, pdFALSE, portMAX_DELAY);
+
+//         if(bits & WIFI_FAIL_BIT) {
+//             // notificar a la Raspberry que fallo
+//             uart_write_bytes(UART_MAIN, "ERR:WIFI_FAIL\n", 14);
+
+//             // esperar a que task_cmd_uart reciba y valide las nuevas credenciales
+//             xEventGroupWaitBits(s_wifi_event_group, WIFI_CREDS_READY, pdTRUE, pdTRUE, portMAX_DELAY);
+//         }
+
+//     } while(!(bits & WIFI_CONNECTED_BIT));
+
+//     esp_wifi.connected = 1;
+//     uart_write_bytes(UART_MAIN, "OK:WIFI\n", 8);
+// }
+
+// void wifi_reconnect(void) {
+//     esp_wifi.connected = 0;
+//     s_retry_num = 0;
+//     esp_wifi_disconnect();
+//     wifi_connect();
+// }
+
+
+
+
+
+
+
+
+// static void wifi_event_handler(void *args, esp_event_base_t event_base, int32_t event_id, void *event_data){
+
+//     //un evento el cual la estacion se inicio 
+//     if(event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START){
+//         // esp_wifi_connect();
+//     }
+//     else if( event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED){
+//         //intentara conectarse de nuevo
+//         if(s_retry_num < ESP_MAX_RETRY){
+//             esp_wifi_connect();
+//             s_retry_num++;
+//             // ESP_LOGW(TAG,"reitentando conexion de WIFI.. (intento: %d/ de: %d)", s_retry_num, ESP_MAX_RETRY);
+//         }
+//         else{
+//             xEventGroupSetBits(s_wifi_event_group, WIFI_FAIL_BIT);
+//             // ESP_LOGE(TAG, "No se pudo conectar al WIFI");
+//         }
+//     }
+//     else if(event_base ==IP_EVENT && event_id == IP_EVENT_STA_GOT_IP){
+//         ip_event_got_ip_t *event=(ip_event_got_ip_t *)event_data;
+//         // ESP_LOGI(TAG, "IP obtenida: "IPSTR, IP2STR(&event->ip_info.ip));
+//         esp_wifi.ip = &event->ip_info.ip;
+//         s_retry_num = 0;
+//         xEventGroupSetBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
+//     }
+
+
+
+// }   
+
+
+// //desconecta y vuelve a conectar con las credenciales, que ya estane en el ssi y el pswd en el momento 
+// void wifi_reconnect(void){
+
+//     // ESP_LOGI(TAG, "reconectando WIFI");
+
+//     esp_wifi.connected=0;
+//     s_retry_num =0;
+
+//     //descoenctar la sesion actual, 
+//     esp_wifi_disconnect();
+//     //conectar con las nuvas credencuales. 
+//     wifi_init_sta();
+// }
+
+
+#include <string.h>
+
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+#include <freertos/event_groups.h>
+
+#include <esp_log.h>
+#include <esp_event.h>
+#include <esp_err.h>
+#include <esp_wifi.h>
+#include <esp_eap_client.h>   // ESP-IDF v5+  (WPA2-Enterprise / PEAP)
+#include <nvs_flash.h>
+#include <lwip/err.h>
+#include <lwip/sys.h>
+
+#include "wifi_lib.h"
+#include "global.h"
+
+// ---------------------------------------------------------------------------
+// privado
+// ---------------------------------------------------------------------------
+static void wifi_event_handler(void *args, esp_event_base_t event_base,
+                               int32_t event_id, void *event_data);
+
+static int s_retry_num = 0;
+
+// ---------------------------------------------------------------------------
+// wifi_stack_init  –  solo hardware, sin conectar
+// ---------------------------------------------------------------------------
+void wifi_stack_init(void) {
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
     esp_netif_create_default_wifi_sta();
@@ -122,14 +266,20 @@ void wifi_stack_init(void) {
 
     esp_event_handler_instance_t instance_any_id;
     esp_event_handler_instance_t instance_got_ip;
-    ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID,       &wifi_event_handler, NULL, &instance_any_id));
-    ESP_ERROR_CHECK(esp_event_handler_instance_register(IP_EVENT,   IP_EVENT_STA_GOT_IP,    &wifi_event_handler, NULL, &instance_got_ip));
+    ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID,
+                    &wifi_event_handler, NULL, &instance_any_id));
+    ESP_ERROR_CHECK(esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP,
+                    &wifi_event_handler, NULL, &instance_got_ip));
 
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
     ESP_ERROR_CHECK(esp_wifi_start());
 }
 
-
+// ---------------------------------------------------------------------------
+// wifi_connect  –  bloquea hasta conectarse
+//   type_connected == 0  →  WPA2-PSK  (red normal)
+//   type_connected == 1  →  WPA2-EAP  (red de empresa / universidad)
+// ---------------------------------------------------------------------------
 void wifi_connect(void) {
 
     EventBits_t bits;
@@ -138,90 +288,99 @@ void wifi_connect(void) {
         xEventGroupClearBits(s_wifi_event_group, WIFI_CONNECTED_BIT | WIFI_FAIL_BIT);
         s_retry_num = 0;
 
-        wifi_config_t wifi_config = {
-            .sta = {
-                .threshold.authmode = WIFI_AUTH_WPA2_PSK,
-            },
-        };
-        strncpy((char*)wifi_config.sta.ssid, esp_wifi.ssid, sizeof(wifi_config.sta.ssid)     - 1);
-        strncpy((char*)wifi_config.sta.password, esp_wifi.pswd, sizeof(wifi_config.sta.password) - 1);
+        if (esp_wifi.type_connected == 1) {
+            // ---- red de empresa (PEAP / MSCHAPv2) -------------------------
+            wifi_config_t wifi_cfg = {
+                .sta = {
+                    .threshold.authmode = WIFI_AUTH_WPA2_ENTERPRISE,
+                },
+            };
+            strncpy((char *)wifi_cfg.sta.ssid, esp_wifi.ssid,
+                    sizeof(wifi_cfg.sta.ssid) - 1);
 
-        ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
+            // Desactivar EAP anterior por si ya habia una sesion previa
+            esp_wifi_sta_enterprise_disable();
+
+            ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_cfg));
+
+            // identity = user_name  (en PEAP suele ser lo mismo)
+            esp_eap_client_set_identity(
+                (uint8_t *)esp_wifi.user_name, strlen(esp_wifi.user_name));
+            esp_eap_client_set_username(
+                (uint8_t *)esp_wifi.user_name, strlen(esp_wifi.user_name));
+            esp_eap_client_set_password(
+                (uint8_t *)esp_wifi.pswd, strlen(esp_wifi.pswd));
+
+            ESP_ERROR_CHECK(esp_wifi_sta_enterprise_enable());
+
+        } else {
+            // ---- red normal (WPA2-PSK) -------------------------------------
+            wifi_config_t wifi_cfg = {
+                .sta = {
+                    .threshold.authmode = WIFI_AUTH_WPA2_PSK,
+                },
+            };
+            strncpy((char *)wifi_cfg.sta.ssid, esp_wifi.ssid,
+                    sizeof(wifi_cfg.sta.ssid) - 1);
+            strncpy((char *)wifi_cfg.sta.password, esp_wifi.pswd,
+                    sizeof(wifi_cfg.sta.password) - 1);
+
+            // Asegurarse de que EAP este desactivado si antes se uso
+            esp_wifi_sta_enterprise_disable();
+
+            ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_cfg));
+        }
+
         esp_wifi_connect();
 
         bits = xEventGroupWaitBits(s_wifi_event_group,
-                                    WIFI_CONNECTED_BIT | WIFI_FAIL_BIT,
-                                    pdTRUE, pdFALSE, portMAX_DELAY);
+                                   WIFI_CONNECTED_BIT | WIFI_FAIL_BIT,
+                                   pdTRUE, pdFALSE, portMAX_DELAY);
 
-        if(bits & WIFI_FAIL_BIT) {
-            // notificar a la Raspberry que fallo
+        if (bits & WIFI_FAIL_BIT) {
             uart_write_bytes(UART_MAIN, "ERR:WIFI_FAIL\n", 14);
-
-            // esperar a que task_cmd_uart reciba y valide las nuevas credenciales
-            xEventGroupWaitBits(s_wifi_event_group, WIFI_CREDS_READY, pdTRUE, pdTRUE, portMAX_DELAY);
+            // espera nuevas credenciales desde task_cmd_uart
+            xEventGroupWaitBits(s_wifi_event_group, WIFI_CREDS_READY,
+                                pdTRUE, pdTRUE, portMAX_DELAY);
         }
 
-    } while(!(bits & WIFI_CONNECTED_BIT));
+    } while (!(bits & WIFI_CONNECTED_BIT));
 
     esp_wifi.connected = 1;
     uart_write_bytes(UART_MAIN, "OK:WIFI\n", 8);
 }
 
+// ---------------------------------------------------------------------------
+// wifi_reconnect
+// ---------------------------------------------------------------------------
 void wifi_reconnect(void) {
     esp_wifi.connected = 0;
-    s_retry_num = 0;
+    s_retry_num        = 0;
     esp_wifi_disconnect();
     wifi_connect();
 }
 
+// ---------------------------------------------------------------------------
+// handler de eventos (privado)
+// ---------------------------------------------------------------------------
+static void wifi_event_handler(void *args, esp_event_base_t event_base,
+                               int32_t event_id, void *event_data) {
 
-
-
-
-
-
-
-static void wifi_event_handler(void *args, esp_event_base_t event_base, int32_t event_id, void *event_data){
-
-    //un evento el cual la estacion se inicio 
-    if(event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START){
-        // esp_wifi_connect();
+    if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
+        // nada: la conexion la dispara wifi_connect()
     }
-    else if( event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED){
-        //intentara conectarse de nuevo
-        if(s_retry_num < ESP_MAX_RETRY){
+    else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
+        if (s_retry_num < ESP_MAX_RETRY) {
             esp_wifi_connect();
             s_retry_num++;
-            // ESP_LOGW(TAG,"reitentando conexion de WIFI.. (intento: %d/ de: %d)", s_retry_num, ESP_MAX_RETRY);
-        }
-        else{
+        } else {
             xEventGroupSetBits(s_wifi_event_group, WIFI_FAIL_BIT);
-            // ESP_LOGE(TAG, "No se pudo conectar al WIFI");
         }
     }
-    else if(event_base ==IP_EVENT && event_id == IP_EVENT_STA_GOT_IP){
-        ip_event_got_ip_t *event=(ip_event_got_ip_t *)event_data;
-        // ESP_LOGI(TAG, "IP obtenida: "IPSTR, IP2STR(&event->ip_info.ip));
+    else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
+        ip_event_got_ip_t *event = (ip_event_got_ip_t *)event_data;
         esp_wifi.ip = &event->ip_info.ip;
         s_retry_num = 0;
         xEventGroupSetBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
     }
-
-
-
-}   
-
-
-//desconecta y vuelve a conectar con las credenciales, que ya estane en el ssi y el pswd en el momento 
-void wifi_reconnect(void){
-
-    // ESP_LOGI(TAG, "reconectando WIFI");
-
-    esp_wifi.connected=0;
-    s_retry_num =0;
-
-    //descoenctar la sesion actual, 
-    esp_wifi_disconnect();
-    //conectar con las nuvas credencuales. 
-    wifi_init_sta();
 }
