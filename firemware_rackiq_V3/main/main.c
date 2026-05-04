@@ -430,16 +430,11 @@
 #include "modules/WIFI/wifi_lib.h"
 #include "modules/UART/uart_lib.h"
 #include "modules/HX711/hx711_lib.h"
+#include "modules/MQTT/mqtt_lib.h"
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Colas
-// ─────────────────────────────────────────────────────────────────────────────
 QueueHandle_t flow_data_queue;
 QueueHandle_t uart_event;
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Variables globales
-// ─────────────────────────────────────────────────────────────────────────────
 static task_uart_port_t user_uart;
 float g_cal_weight_kg = 0.0f;
 
@@ -453,28 +448,20 @@ static const wifi_default_ent_profile_t default_ent_profiles[] = {
 };
 #define DEFAULT_ENT_PROFILES_COUNT (sizeof(default_ent_profiles) / sizeof(default_ent_profiles[0]))
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Grupos de eventos y estructuras
-// ─────────────────────────────────────────────────────────────────────────────
 EventGroupHandle_t s_wifi_event_group;
 esp_wifi_t         esp_wifi;
 hx711_t            hx;
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Prototipos
-// ─────────────────────────────────────────────────────────────────────────────
 char    **parse_input(char *line);
 esp_err_t update_setup_cred(char *key, char *anchor, char *pswd_ent, char *identificator);
 void      task_cmd_uart(void *params);
 void      task_hx711_uart(void *params);
 void      task_hx711_calibrate(void *params);
 
-// ─────────────────────────────────────────────────────────────────────────────
-// app_main
-// ─────────────────────────────────────────────────────────────────────────────
+
 void app_main(void)
 {
-    // ── UART ─────────────────────────────────────────────────────────────────
+
     flow_data_queue    = xQueueCreate(10, sizeof(char *));
     user_uart.NUM_PORT = UART_NUM_0;
     uart_init(user_uart.NUM_PORT, 115200,
@@ -483,8 +470,6 @@ void app_main(void)
 
     xTaskCreate(task_uart,     "task_uart",     4096, &user_uart, 9, NULL);
     xTaskCreate(task_cmd_uart, "task_cmd_uart", 4096, NULL,       8, NULL);
-
-    // ── NVS + WiFi ───────────────────────────────────────────────────────────
     s_wifi_event_group = xEventGroupCreate();
 
     esp_err_t ret = nvs_flash_init();
@@ -494,7 +479,6 @@ void app_main(void)
     }
     ESP_ERROR_CHECK(ret);
 
-    // ── HX711 ─────────────────────────────────────────────────────────────────
     hx711_init(&hx, DOUT_PIN, PD_SCK_PIN);
 
     if (hx711_load_calibration(&hx)) {
@@ -512,31 +496,32 @@ void app_main(void)
         uart_write_bytes(UART_NUM_0, msg, sizeof(msg) - 1);
         xTaskCreate(task_hx711_calibrate, "hx711_cal", 4096, &hx, 6, NULL);
     }
-
-    // ── WiFi ─────────────────────────────────────────────────────────────────
     update_setup_cred((char *)default_profiles[0].ssid,
                       (char *)default_profiles[0].pswd, NULL, "SSID");
     xEventGroupSetBits(s_wifi_event_group, WIFI_CREDS_READY);
     wifi_init_sta();
 
+
+    xEventGroupWaitBits(s_wifi_event_group,WIFI_CONNECTED_BIT,pdFALSE,pdTRUE,portMAX_DELAY);
+    mqtt_init(s_wifi_event_group); 
+
+
     xTaskCreate(task_hx711_uart, "task_hx711_uart", 4096, NULL, 5, NULL);
+
+    xTaskCreate(task_mqtt_weight_publisher,"mqtt_weight",       4096, &hx, 5, NULL); 
+    xTaskCreate(task_mqtt_heartbeat,       "mqtt_heartbeat",    2048, NULL, 4, NULL);
+
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// task_hx711_calibrate
-// ─────────────────────────────────────────────────────────────────────────────
 void task_hx711_calibrate(void *params)
 {
     hx711_t *hx_p = (hx711_t *)params;
     char msg[160];
     int  len;
-
-    // Paso 1 ── esperar TARE ──────────────────────────────────────────────────
     xEventGroupWaitBits(s_wifi_event_group,
                         HX711_CAL_TARE_READY,
                         pdTRUE, pdFALSE, portMAX_DELAY);
 
-    // Suspender tarea interna ANTES de tocar GPIO para que no haya conflicto
     hx711_suspend_task(hx_p);
     hx711_tare(hx_p, 20);
 
@@ -546,8 +531,6 @@ void task_hx711_calibrate(void *params)
                    "CAL:<peso_kg>   ej: CAL:1.000\r\n",
                    (long)hx_p->offset);
     uart_write_bytes(UART_NUM_0, msg, len);
-
-    // Paso 2 ── esperar CAL:<peso> ────────────────────────────────────────────
     xEventGroupWaitBits(s_wifi_event_group,
                         HX711_CAL_WEIGHT_OK,
                         pdTRUE, pdFALSE, portMAX_DELAY);
@@ -562,8 +545,6 @@ void task_hx711_calibrate(void *params)
         vTaskDelete(NULL);
         return;
     }
-
-    // Calcular escala: cuentas ADC por kg
     int32_t raw_ref = hx711_read_average(hx_p, 20);
     float   scale   = (float)(raw_ref - hx_p->offset) / g_cal_weight_kg;
 
@@ -586,17 +567,12 @@ void task_hx711_calibrate(void *params)
                    g_cal_weight_kg, (long)raw_ref, (long)hx_p->offset, scale);
     uart_write_bytes(UART_NUM_0, msg, len);
 
-    // Reanudar / arrancar tarea interna y habilitar impresión
     if (hx_p->task_handle == NULL) hx711_start_task(hx_p);
     else                           hx711_resume_task(hx_p);
 
     xEventGroupClearBits(s_wifi_event_group, HX711_PAUSE_PRINT);
     vTaskDelete(NULL);
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// task_hx711_uart
-// ─────────────────────────────────────────────────────────────────────────────
 void task_hx711_uart(void *params)
 {
     char msg[100];
@@ -616,13 +592,12 @@ void task_hx711_uart(void *params)
             uart_write_bytes(UART_NUM_0, msg, len);
         }
         
-        // Retraso aumentado a 1.5 segundos (1500 ms) para darte tiempo de escribir
+        
         vTaskDelay(pdMS_TO_TICKS(1500));
     }
 }
-// ─────────────────────────────────────────────────────────────────────────────
-// task_cmd_uart
-// ─────────────────────────────────────────────────────────────────────────────
+
+
 void task_cmd_uart(void *params)
 {
     char *cmd_receive;
@@ -642,7 +617,6 @@ void task_cmd_uart(void *params)
                 continue;
             }
 
-            // ── SET_WIFI ──────────────────────────────────────────────────────
             if (strcmp(tokens[0], "SET_WIFI") == 0) {
                 if (tokens[1] == NULL) {
                     len = snprintf(error_msg, sizeof(error_msg), "\r\nMAIN: error al parsear\r\n");
