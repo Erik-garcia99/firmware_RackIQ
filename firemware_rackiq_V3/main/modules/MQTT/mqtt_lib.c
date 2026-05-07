@@ -14,9 +14,9 @@
 
 static const char *TAG = "MQTT";
 
-#define MQTT_BROKER_URI  "mqtt://192.168.1.100:1883"   
+// #define MQTT_BROKER_URI  "mqtt://192.168.1.100:1883"   
 #define MQTT_SHELF_ID    "shelf_01"                     
-
+static char broker_uri[64] = {0};
 static esp_mqtt_client_handle_t mqtt_client = NULL;
 static EventGroupHandle_t wifi_event_group = NULL;
 static char shelf_id[32] = MQTT_SHELF_ID;
@@ -24,25 +24,18 @@ static char shelf_id[32] = MQTT_SHELF_ID;
 static void mqtt_event_handler(void *arg, esp_event_base_t base,
                                int32_t event_id, void *event_data);
 
-esp_err_t mqtt_init(EventGroupHandle_t event_group)
+esp_err_t mqtt_init(EventGroupHandle_t event_group, const char *broker_ip)
 {
     wifi_event_group = event_group;
+    snprintf(broker_uri, sizeof(broker_uri), "mqtt://%s:1883", broker_ip);
 
-    // Espera a que el WiFi esté conectado
     xEventGroupWaitBits(wifi_event_group, WIFI_CONNECTED_BIT,
                         pdFALSE, pdTRUE, portMAX_DELAY);
 
-    // Configuración de conexión
     esp_mqtt_client_config_t mqtt_cfg = {
-        .broker.address.uri = MQTT_BROKER_URI,
-        .credentials = {
-            .username = NULL,
-            .authentication.password = NULL,
-        },
-        .session = {
-            .keepalive = 60,
-            .disable_clean_session = false,
-        },
+        .broker.address.uri = broker_uri,
+        .session.keepalive = 60,
+        .session.disable_clean_session = false,
     };
 
     mqtt_client = esp_mqtt_client_init(&mqtt_cfg);
@@ -53,25 +46,30 @@ esp_err_t mqtt_init(EventGroupHandle_t event_group)
 
     esp_mqtt_client_register_event(mqtt_client, ESP_EVENT_ANY_ID,
                                    mqtt_event_handler, NULL);
-
-    ESP_LOGI(TAG, "Conectando al broker local %s", MQTT_BROKER_URI);
     esp_mqtt_client_start(mqtt_client);
     return ESP_OK;
 }
 
+
+
 static void mqtt_event_handler(void *arg, esp_event_base_t base,
                                int32_t event_id, void *event_data)
 {
-    // (void)arg; (void)event_data; // si se desea evitar warning de unused
     switch ((esp_mqtt_event_id_t)event_id) {
-        case MQTT_EVENT_CONNECTED:
-            ESP_LOGI(TAG, "Conectado al broker MQTT local");
+        case MQTT_EVENT_CONNECTED: {
+            ESP_LOGI(TAG, "Conectado al broker MQTT");
+            // Publicar MAC:ACK
+            uint8_t mac[6];
+            esp_efuse_mac_get_default(mac);
+            char payload[32];
+            snprintf(payload, sizeof(payload),
+                     "%02X:%02X:%02X:%02X:%02X:%02X:ACK",
+                     mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+            esp_mqtt_client_publish(mqtt_client, "Rackiq/broker", payload, 0, 1, 0);
             break;
+        }
         case MQTT_EVENT_DISCONNECTED:
             ESP_LOGW(TAG, "Desconectado del broker");
-            break;
-        case MQTT_EVENT_PUBLISHED:
-            // Opcional: log de publicación exitosa
             break;
         default:
             break;

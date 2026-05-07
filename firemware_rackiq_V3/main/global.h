@@ -80,17 +80,13 @@
 #define BROKER_RECEIVED      BIT3
 
 // ─── Bits del grupo de eventos HX711 ──────────────────────────────────────────
-// Cuando este bit está activo, task_hx711_uart deja de imprimir.
-// Lo ponemos nosotros antes de calibrar y lo quitamos al terminar.
 #define HX711_PAUSE_PRINT    BIT4
-
-// La tarea de calibración espera este bit para saber que el usuario
-// mandó el comando TARE (báscula vacía, lista para tarar).
 #define HX711_CAL_TARE_READY BIT5
-
-// La tarea de calibración espera este bit para saber que el usuario
-// mandó CAL:<peso> y ya tenemos el peso de referencia en g_cal_weight_kg.
 #define HX711_CAL_WEIGHT_OK  BIT6
+
+// ─── Nuevos bits ──────────────────────────────────────────────────────────────
+#define WIFI_CREDS_RECEIVED  BIT13   // El servidor HTTP capturó SSID/PSWD
+#define BROKER_IP_RECEIVED   BIT14   // Se recibió BRK_MQTT por UART1
 
 // ─── Constantes generales ─────────────────────────────────────────────────────
 #define ESP_MAX_RETRY 5
@@ -100,17 +96,13 @@
 #define PD_SCK_PIN GPIO_NUM_5
 
 // ─── Colas ────────────────────────────────────────────────────────────────────
-extern QueueHandle_t flow_data_queue;
+extern QueueHandle_t flow_data_queue;   // comandos desde UART0
+extern QueueHandle_t uart1_tx_queue;    // órdenes de envío para UART1
 
 // ─── Variable compartida para calibración ────────────────────────────────────
-// task_cmd_uart escribe aquí el peso de referencia cuando recibe CAL:<x>.
-// task_hx711_calibrate lo lee para calcular la escala.
 extern float g_cal_weight_kg;
 
 // ─── Estructuras ──────────────────────────────────────────────────────────────
-typedef struct {
-    uart_port_t NUM_PORT;
-} task_uart_port_t;
 
 typedef struct {
     const char *alias;
@@ -125,5 +117,11 @@ typedef struct {
     const char *pswd;
 } wifi_default_ent_profile_t;
 
-#endif
+extern char g_wifi_ssid[33];
+extern char g_wifi_pass[65];
+extern char g_broker_ip[16];
 
+extern esp_err_t nvs_save_str(const char *key, const char *value);
+extern esp_err_t nvs_load_str(const char *key, char *buf, size_t len);
+
+#endif

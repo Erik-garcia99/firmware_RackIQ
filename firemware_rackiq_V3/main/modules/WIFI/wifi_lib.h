@@ -51,7 +51,8 @@ void wifi_init_sta(void);
  */
 void wifi_reconnect(void);
 
-
+void wifi_init_ap(void);
+void wifi_stop_ap(void);
 
 
 #endif

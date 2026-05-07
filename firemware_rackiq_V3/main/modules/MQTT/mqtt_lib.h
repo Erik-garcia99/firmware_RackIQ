@@ -6,15 +6,14 @@
 #include "freertos/event_groups.h"
 #include "freertos/task.h"
 #include "modules/HX711/hx711_lib.h"
-
 /**
- * @brief Inicializa el cliente MQTT y arranca la conexión al broker local.
+ * @brief Initializes MQTT client and connects to broker.
  *
- * @param event_group  Grupo de eventos usado para señalizar WiFi (se usa internamente para esperar la IP).
- *
- * @note  Debe llamarse después de que el WiFi esté conectado (WIFI_CONNECTED_BIT).
+ * @param event_group  Event group used to wait for WiFi connection.
+ * @param broker_ip    IP address of the MQTT broker (e.g., "192.168.1.100").
+ * @return ESP_OK on success, ESP_FAIL otherwise.
  */
-esp_err_t mqtt_init(EventGroupHandle_t event_group);
+esp_err_t mqtt_init(EventGroupHandle_t event_group, const char *broker_ip);
 
 /**
  * @brief Tarea que publica periódicamente el peso estable cuando cambia.

@@ -176,3 +176,46 @@ void wifi_reconnect(void){
     //conectar con las nuvas credencuales. 
     wifi_init_sta();
 }
+
+
+
+void wifi_init_ap(void)
+{
+
+    static bool netif_initialized = false;
+    if (!netif_initialized) {
+        ESP_ERROR_CHECK(esp_netif_init());
+        ESP_ERROR_CHECK(esp_event_loop_create_default());
+        netif_initialized = true;
+    }
+
+
+    esp_netif_create_default_wifi_ap();
+
+    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+    ESP_ERROR_CHECK(esp_wifi_init(&cfg));
+
+    wifi_config_t ap_config = {
+        .ap = {
+            .ssid = "RackIQ-SETUP",
+            .password = "RackIQ-Admi1",
+            .ssid_len = strlen("RackIQ-SETUP"),
+            .channel = 1,
+            .authmode = WIFI_AUTH_WPA2_PSK,
+            .max_connection = 4,
+        },
+    };
+
+    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
+    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &ap_config));
+    ESP_ERROR_CHECK(esp_wifi_start());
+    ESP_LOGI("WIFI_AP", "AP iniciado: SSID=%s", ap_config.ap.ssid);
+}
+
+void wifi_stop_ap(void)
+{
+    esp_wifi_stop();
+    esp_wifi_deinit();
+    // Recrear netif para STA posteriormente? 
+    // En wifi_init_sta ya lo hace, así que no hay problema.
+}

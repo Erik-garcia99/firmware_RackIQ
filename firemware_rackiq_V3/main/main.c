@@ -414,16 +414,21 @@
 
 // drivers
 #include <driver/uart.h>
+#include<driver/gpio.h>
 
 // logs
 #include <esp_log.h>
 #include <esp_err.h>
+#include <nvs_flash.h>
+#include <nvs.h>
 
 // wifi
 #include <esp_wifi.h>
 #include <nvs_flash.h>
 #include <lwip/err.h>
 #include <lwip/sys.h>
+#include <esp_http_server.h>
+
 
 // librerías propias
 #include "global.h"
@@ -431,12 +436,35 @@
 #include "modules/UART/uart_lib.h"
 #include "modules/HX711/hx711_lib.h"
 #include "modules/MQTT/mqtt_lib.h"
+#include "modules/HTTP/http_setup.h"
 
+
+
+
+
+
+
+
+//+++++++++++++++++++++++++++++++colas 
 QueueHandle_t flow_data_queue;
 QueueHandle_t uart_event;
+QueueHandle_t uart1_tx_queue;
 
-static task_uart_port_t user_uart;
+
+//+++++++++++++++++++++++++++++++grupos de deventos 
+EventGroupHandle_t s_wifi_event_group;
+esp_wifi_t         esp_wifi;
+hx711_t            hx;
+
+//+++++++++++++++++++++++++++++++varibales globales 
+
+// static task_uart_port_t user_uart;
 float g_cal_weight_kg = 0.0f;
+
+
+
+
+//+++++++++++++++++++++++++++++++estructuras 
 
 static const wifi_default_profile_t default_profiles[] = {
     { "DFT_1", "INFINITUMF4AF", "nFukH34MPW" },
@@ -448,29 +476,39 @@ static const wifi_default_ent_profile_t default_ent_profiles[] = {
 };
 #define DEFAULT_ENT_PROFILES_COUNT (sizeof(default_ent_profiles) / sizeof(default_ent_profiles[0]))
 
-EventGroupHandle_t s_wifi_event_group;
-esp_wifi_t         esp_wifi;
-hx711_t            hx;
+
+
+//+++++++++++++++++++++++++++++++Credenciales WiFi / Broker preparadas
+char g_wifi_ssid[33] = {0};
+char g_wifi_pass[65] = {0};
+char g_broker_ip[16]  = {0};   // solo la IP, luego se arma la URI
+
+
+
+//+++++++++++++++++++++++++++++++funciones 
 
 char    **parse_input(char *line);
 esp_err_t update_setup_cred(char *key, char *anchor, char *pswd_ent, char *identificator);
+
+
+
+//+++++++++++++++++++++++++++++++ NVS helpers
+esp_err_t nvs_save_str(const char *key, const char *value);
+esp_err_t nvs_load_str(const char *key, char *buf, size_t len);
+// static void      nvs_erase_key(const char *key);
+
+
+
+//+++++++++++++++++++++++++++++++tareas
 void      task_cmd_uart(void *params);
 void      task_hx711_uart(void *params);
 void      task_hx711_calibrate(void *params);
 
 
+
+
 void app_main(void)
 {
-
-    flow_data_queue    = xQueueCreate(10, sizeof(char *));
-    user_uart.NUM_PORT = UART_NUM_0;
-    uart_init(user_uart.NUM_PORT, 115200,
-              UART_DATA_8_BITS, UART_PARITY_DISABLE, UART_STOP_BITS_1,
-              UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
-
-    xTaskCreate(task_uart,     "task_uart",     4096, &user_uart, 9, NULL);
-    xTaskCreate(task_cmd_uart, "task_cmd_uart", 4096, NULL,       8, NULL);
-    s_wifi_event_group = xEventGroupCreate();
 
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
@@ -479,6 +517,33 @@ void app_main(void)
     }
     ESP_ERROR_CHECK(ret);
 
+
+
+    flow_data_queue    = xQueueCreate(10, sizeof(char *)); //comunicacion entre UART 0 (PC-esp)
+    uart1_tx_queue     = xQueueCreate(5,  sizeof(char *)); // comuniacion enter esp y RPI 
+
+    // user_uart.NUM_PORT = UART_NUM_0;
+    QueueHandle_t uart0_evt;
+    uart_init(UART_NUM_0, 115200, UART_DATA_8_BITS, UART_PARITY_DISABLE,
+            UART_STOP_BITS_1, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE, &uart0_evt);
+    uart_task_config_t uart0_cfg = { .port = UART_NUM_0, .event_queue = uart0_evt };
+    xTaskCreate(task_uart, "task_uart", 4096, &uart0_cfg, 9, NULL);
+    
+    //comunicion entre ESP y RPI
+    
+    QueueHandle_t uart1_evt;
+    uart_init(UART_NUM_1, 115200, UART_DATA_8_BITS, UART_PARITY_DISABLE,
+            UART_STOP_BITS_1, 18, 19, &uart1_evt);
+    uart_task_config_t uart1_cfg = { .port = UART_NUM_1, .event_queue = uart1_evt };
+    xTaskCreate(task_uart, "task_uart1", 4096, &uart1_cfg, 8, NULL);
+
+    xTaskCreate(task_cmd_uart, "task_cmd_uart", 4096, NULL,       8, NULL);
+    
+
+    //creamoe el grupo de eventos de wifi
+    s_wifi_event_group = xEventGroupCreate();
+
+    //inciamos el HX711
     hx711_init(&hx, DOUT_PIN, PD_SCK_PIN);
 
     if (hx711_load_calibration(&hx)) {
@@ -496,22 +561,106 @@ void app_main(void)
         uart_write_bytes(UART_NUM_0, msg, sizeof(msg) - 1);
         xTaskCreate(task_hx711_calibrate, "hx711_cal", 4096, &hx, 6, NULL);
     }
-    update_setup_cred((char *)default_profiles[0].ssid,
-                      (char *)default_profiles[0].pswd, NULL, "SSID");
+    
+    //verificar que no hayan credenucales de WIFI guardadas 
+
+
+    bool creds_in_nvs = false;
+    if (nvs_load_str("wifi_ssid", g_wifi_ssid, sizeof(g_wifi_ssid)) == ESP_OK &&
+        nvs_load_str("wifi_pass", g_wifi_pass, sizeof(g_wifi_pass)) == ESP_OK) {
+        creds_in_nvs = true;
+    }
+    
+
+    if (!creds_in_nvs) {
+        // ── No hay credenciales → levantar AP + servidor HTTP ──────────────
+        char msg[] = "\r\n[WIFI] Sin credenciales guardadas. Iniciando punto de acceso...\r\n";
+        uart_write_bytes(UART_NUM_0, msg, sizeof(msg)-1);
+
+        // Iniciar AP (SSID: RackIQ-SETUP, PSWD: RackIQ-Admi1)
+        wifi_init_ap();
+
+        // Iniciar servidor HTTP de configuración
+        start_http_setup_server(s_wifi_event_group);
+
+        // Esperar a que el usuario envíe SSID/PSWD desde la web
+        xEventGroupWaitBits(s_wifi_event_group, WIFI_CREDS_RECEIVED,pdTRUE, pdFALSE, portMAX_DELAY);
+        // Detener servidor y AP
+        stop_http_setup_server();
+        wifi_stop_ap();
+
+        // Ahora g_wifi_ssid y g_wifi_pass ya fueron guardadas por el handler HTTP
+
+        // Enviar SET_WIFI por UART1 y esperar ACK
+        char set_wifi_cmd[128];
+        snprintf(set_wifi_cmd, sizeof(set_wifi_cmd),"SET_WIFI:%s:%s", g_wifi_ssid, g_wifi_pass);
+        // Enviar a la tarea UART1
+        char *cmd_to_send = strdup(set_wifi_cmd);
+        xQueueSend(uart1_tx_queue, &cmd_to_send, portMAX_DELAY);
+
+        // La tarea task_uart1 enviará el comando y esperará "ACK".
+        // Aquí en main esperamos un evento que indique ACK recibido.
+        xEventGroupWaitBits(s_wifi_event_group, BROKER_RECEIVED,pdTRUE, pdFALSE, portMAX_DELAY);
+        xEventGroupClearBits(s_wifi_event_group, BROKER_RECEIVED);
+        uart_write_bytes(UART_NUM_0, "\r\n[UART1] ACK recibido, procediendo a conectar WiFi...\r\n", 58);
+    }
+
+    
+    update_setup_cred(g_wifi_ssid, g_wifi_pass, NULL, "SSID");
     xEventGroupSetBits(s_wifi_event_group, WIFI_CREDS_READY);
     wifi_init_sta();
 
-
+    //esperar a que wifi se coencte 
     xEventGroupWaitBits(s_wifi_event_group,WIFI_CONNECTED_BIT,pdFALSE,pdTRUE,portMAX_DELAY);
-    mqtt_init(s_wifi_event_group); 
+
+    // verificiar / esperar la IP del broker levantado en la RPI 
+    
+    if (nvs_load_str("mqtt_broker", g_broker_ip, sizeof(g_broker_ip)) != ESP_OK) {
+        char msg[] = "\r\n[MQTT] Esperando IP del broker por UART1 (BRK_MQTT:<ip>)...\r\n";
+        uart_write_bytes(UART_NUM_0, msg, sizeof(msg)-1);
+        xEventGroupWaitBits(s_wifi_event_group, BROKER_IP_RECEIVED,
+                            pdTRUE, pdFALSE, portMAX_DELAY);
+    }
+    
+    
+    // Inicializar MQTT con la IP (g_broker_ip ya está llena)
+    mqtt_init(s_wifi_event_group, g_broker_ip); 
 
 
     xTaskCreate(task_hx711_uart, "task_hx711_uart", 4096, NULL, 5, NULL);
-
     xTaskCreate(task_mqtt_weight_publisher,"mqtt_weight",       4096, &hx, 5, NULL); 
     xTaskCreate(task_mqtt_heartbeat,       "mqtt_heartbeat",    2048, NULL, 4, NULL);
 
 }
+
+
+
+// NVS helpers 
+
+
+esp_err_t nvs_save_str(const char *key, const char *value)
+{
+    nvs_handle_t handle;
+    esp_err_t err = nvs_open("storage", NVS_READWRITE, &handle);
+    if (err != ESP_OK) return err;
+    err = nvs_set_str(handle, key, value);
+    if (err == ESP_OK) nvs_commit(handle);
+    nvs_close(handle);
+    return err;
+}
+
+esp_err_t nvs_load_str(const char *key, char *buf, size_t len)
+{
+    nvs_handle_t handle;
+    esp_err_t err = nvs_open("storage", NVS_READONLY, &handle);
+    if (err != ESP_OK) return err;
+    size_t required = len;
+    err = nvs_get_str(handle, key, buf, &required);
+    nvs_close(handle);
+    return err;
+}
+
+
 
 void task_hx711_calibrate(void *params)
 {
@@ -771,6 +920,21 @@ void task_cmd_uart(void *params)
                              "Coloque la estructura/soporte vacio y envie: TARE\r\n";
                 uart_write_bytes(UART_NUM_0, msg, sizeof(msg) - 1);
                 xTaskCreate(task_hx711_calibrate, "hx711_cal", 4096, &hx, 6, NULL);
+            }
+
+            else if (strcmp(tokens[0], "ACK") == 0) {
+                // ACK recibido desde UART1
+                xEventGroupSetBits(s_wifi_event_group, BROKER_RECEIVED);
+            }
+            else if (strcmp(tokens[0], "BRK_MQTT") == 0) {
+                if (tokens[1] != NULL) {
+                    strncpy(g_broker_ip, tokens[1], sizeof(g_broker_ip));
+                    nvs_save_str("mqtt_broker", g_broker_ip);
+                    xEventGroupSetBits(s_wifi_event_group, BROKER_IP_RECEIVED);
+                    len = snprintf(error_msg, sizeof(error_msg),
+                                   "\r\n[CMD] Broker MQTT guardado: %s\r\n", g_broker_ip);
+                    uart_write_bytes(UART_NUM_0, error_msg, len);
+                }
             }
 
             free(cmd_receive);

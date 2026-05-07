@@ -6,6 +6,7 @@
 //librerias
 #include<driver/uart.h>
 #include<freertos/FreeRTOS.h>
+#include<esp_err.h>
 //macros 
 #define BUFFER 1024
 
@@ -17,10 +18,14 @@
 //varibales flobales 
 
 //colas freertos
-extern QueueHandle_t uart_event;
+// extern QueueHandle_t uart_event;
+typedef struct {
+    uart_port_t port;
+    QueueHandle_t event_queue;
+} uart_task_config_t;
 
 
-#include<esp_err.h>
+
 
 /**
  * @brief inicar un UART
@@ -33,11 +38,11 @@ extern QueueHandle_t uart_event;
  * @param RX pin de recepcion
  * @param TX pin de trasmision
  *
- *
+ * @param ret_queue regresa la cola en donde se estaran recibiendo los eventos del uart, como cuando se recibe un byte, o cuando se llena el buffer, etc.
  * @return ESP_OK si se asigno correctamente el puerto de uart
  * @return ESP_FAIL si en algun punto fallo
 */
-esp_err_t uart_init(uart_port_t uart_sel, int BoudRate, uart_word_length_t uart_data_length, uart_parity_t uart_parity, uart_stop_bits_t uart_stop_bits, int TX, int RX);
+esp_err_t uart_init(uart_port_t uart_sel, int BoudRate, uart_word_length_t uart_data_length, uart_parity_t uart_parity, uart_stop_bits_t uart_stop_bits, int TX, int RX,QueueHandle_t *ret_queue);
 
 
 // 
