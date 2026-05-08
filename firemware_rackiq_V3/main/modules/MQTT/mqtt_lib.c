@@ -84,18 +84,16 @@ static void set_shelf_id_from_mac(void)
              mac[3], mac[4], mac[5]);
 }
 
-static inline float fabsf_manual(float x) {
-    return (x < 0.0f) ? -x : x;
-}
+
 
 void task_mqtt_weight_publisher(void *arg)
 {
     hx711_t *hx = (hx711_t *)arg;
-    float last_published_weight = -999.0f;
+    // float last_published_weight = -999.0f;
     char topic[64];
     char json_payload[64];
     TickType_t last_wake_time = xTaskGetTickCount();
-    const TickType_t period = pdMS_TO_TICKS(1000);   // 1 segundo
+    const TickType_t period = pdMS_TO_TICKS(60000);   // 1 minuto
 
     // Asegurar shelf_id
     if (shelf_id[0] == '\0') {
@@ -115,24 +113,18 @@ void task_mqtt_weight_publisher(void *arg)
             weight = hx711_get_weight(hx);
         }
 
-        // Publicar solo si el cambio supera 0.01 kg (10 g)
-        float diff = weight - last_published_weight;
-        if (fabsf_manual(diff) >= 0.01f) {
-            last_published_weight = weight;
+        //construri el JSON 
 
-            // Construir JSON manualmente
-            int len = snprintf(json_payload, sizeof(json_payload),
-                               "{\"weight\":%.2f}", weight);
-            if (len < 0 || len >= sizeof(json_payload)) {
-                ESP_LOGE(TAG, "Error al crear payload JSON");
-                continue;
-            }
-
-            // Publicar
-            snprintf(topic, sizeof(topic), "rackiq/shelf/%s/weight", shelf_id);
-            esp_mqtt_client_publish(mqtt_client, topic, json_payload, 0, 1, 0);
+        // Construir JSON manualmente
+        int len = snprintf(json_payload, sizeof(json_payload),"{\"weight\":%.2f}", weight);
+        if (len < 0 || len >= sizeof(json_payload)) {
+            ESP_LOGE(TAG, "Error al crear payload JSON");
+            continue;
         }
 
+        // Publicar
+        snprintf(topic, sizeof(topic), "rackiq/shelf/%s/weight", shelf_id);
+        esp_mqtt_client_publish(mqtt_client, topic, json_payload, 0, 1, 0);
         vTaskDelayUntil(&last_wake_time, period);
     }
 }

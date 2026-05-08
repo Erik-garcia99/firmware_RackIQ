@@ -21,8 +21,10 @@ idf_component_register(
         wpa_supplicant     # SOLUCIÓN al error de esp_eap_client.h
         lwip               # Stack TCP/IP
         esp_http_server
+        mdns
     PRIV_REQUIRES 
         esp_driver_uart    # Para driver/uart.h
         esp_driver_gpio    # Para driver/gpio.h
         esp_netif          # Interfaz de red
+        mdns
 )

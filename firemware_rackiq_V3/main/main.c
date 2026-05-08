@@ -429,6 +429,10 @@
 #include <lwip/sys.h>
 #include <esp_http_server.h>
 
+//dns
+#include "esp_mac.h"
+#include "mdns.h"
+
 
 // librerías propias
 #include "global.h"
@@ -460,6 +464,7 @@ hx711_t            hx;
 
 // static task_uart_port_t user_uart;
 float g_cal_weight_kg = 0.0f;
+uint8_t g_device_role = 0;  
 
 
 
@@ -517,6 +522,16 @@ void app_main(void)
     }
     ESP_ERROR_CHECK(ret);
 
+    gpio_set_direction(ROLE_PIN, GPIO_MODE_INPUT);
+    gpio_pullup_en(ROLE_PIN);             // conectar a tierra para ESP SALVE
+    vTaskDelay(pdMS_TO_TICKS(100));       
+    if (gpio_get_level(ROLE_PIN) == 0) {  
+        g_device_role = ROLE_SLAVE;
+        printf("\r\n[ROLE] SLAVE\r\n");
+    } else {
+        g_device_role = ROLE_MASTER;
+        printf("\r\n[ROLE] MASTER\r\n");
+    }
 
 
     flow_data_queue    = xQueueCreate(10, sizeof(char *)); //comunicacion entre UART 0 (PC-esp)
@@ -589,20 +604,19 @@ void app_main(void)
         stop_http_setup_server();
         wifi_stop_ap();
 
+        if (g_device_role == ROLE_MASTER) {
+            // Master: manda SET_WIFI a la RPi por UART1 y espera ACK
+            char set_wifi_cmd[128];
+            snprintf(set_wifi_cmd, sizeof(set_wifi_cmd),"SET_WIFI:%s:%s", g_wifi_ssid, g_wifi_pass);
+            char *cmd_to_send = strdup(set_wifi_cmd);
+            xQueueSend(uart1_tx_queue, &cmd_to_send, portMAX_DELAY);
+            xEventGroupWaitBits(s_wifi_event_group, BROKER_RECEIVED,
+                                pdTRUE, pdFALSE, portMAX_DELAY);
+            xEventGroupClearBits(s_wifi_event_group, BROKER_RECEIVED);
+            uart_write_bytes(UART_NUM_0, "[UART1] ACK recibido\r\n", 26);
+        }
+
         // Ahora g_wifi_ssid y g_wifi_pass ya fueron guardadas por el handler HTTP
-
-        // Enviar SET_WIFI por UART1 y esperar ACK
-        char set_wifi_cmd[128];
-        snprintf(set_wifi_cmd, sizeof(set_wifi_cmd),"SET_WIFI:%s:%s", g_wifi_ssid, g_wifi_pass);
-        // Enviar a la tarea UART1
-        char *cmd_to_send = strdup(set_wifi_cmd);
-        xQueueSend(uart1_tx_queue, &cmd_to_send, portMAX_DELAY);
-
-        // La tarea task_uart1 enviará el comando y esperará "ACK".
-        // Aquí en main esperamos un evento que indique ACK recibido.
-        xEventGroupWaitBits(s_wifi_event_group, BROKER_RECEIVED,pdTRUE, pdFALSE, portMAX_DELAY);
-        xEventGroupClearBits(s_wifi_event_group, BROKER_RECEIVED);
-        uart_write_bytes(UART_NUM_0, "\r\n[UART1] ACK recibido, procediendo a conectar WiFi...\r\n", 58);
     }
 
     
@@ -614,13 +628,47 @@ void app_main(void)
     xEventGroupWaitBits(s_wifi_event_group,WIFI_CONNECTED_BIT,pdFALSE,pdTRUE,portMAX_DELAY);
 
     // verificiar / esperar la IP del broker levantado en la RPI 
-    
-    if (nvs_load_str("mqtt_broker", g_broker_ip, sizeof(g_broker_ip)) != ESP_OK) {
-        char msg[] = "\r\n[MQTT] Esperando IP del broker por UART1 (BRK_MQTT:<ip>)...\r\n";
-        uart_write_bytes(UART_NUM_0, msg, sizeof(msg)-1);
-        xEventGroupWaitBits(s_wifi_event_group, BROKER_IP_RECEIVED,
-                            pdTRUE, pdFALSE, portMAX_DELAY);
+    //master espera por uART
+    if(g_device_role == ROLE_MASTER){
+        if (nvs_load_str("mqtt_broker", g_broker_ip, sizeof(g_broker_ip)) != ESP_OK) {
+            char msg[] = "\r\n[MQTT] Esperando IP del broker por UART1 (BRK_MQTT:<ip>)...\r\n";
+            uart_write_bytes(UART_NUM_0, msg, sizeof(msg)-1);
+            xEventGroupWaitBits(s_wifi_event_group, BROKER_IP_RECEIVED,pdTRUE, pdFALSE, portMAX_DELAY);
+        }
     }
+    else{
+        //SLAVE pregunta por mDNS
+        // Intentar cargar de NVS por si ya la tiene de antes
+        if (nvs_load_str("mqtt_broker", g_broker_ip, sizeof(g_broker_ip)) != ESP_OK) {
+            // Resolver por mDNS
+            esp_err_t mdns_err = mdns_init();
+            if (mdns_err == ESP_OK) {
+                uart_write_bytes(UART_NUM_0, "[MDNS] Buscando Rackiq-broker.local vía mDNS...\r\n", 42);
+                esp_ip4_addr_t addr;
+                addr.addr = 0;
+                mdns_err = mdns_query_a("Rackiq-broker.local", 3000, &addr);
+                
+                if (mdns_err == ESP_OK && addr.addr != 0) {
+                    snprintf(g_broker_ip, sizeof(g_broker_ip),IPSTR, IP2STR(&addr));
+                    nvs_save_str("mqtt_broker", g_broker_ip);
+                    char msg[60];
+                    int len = snprintf(msg, sizeof(msg), "\r\n[MDNS] Broker encontrado: %s\r\n", g_broker_ip);
+                    uart_write_bytes(UART_NUM_0, msg, len);
+                } else {
+                    uart_write_bytes(UART_NUM_0, "[MDNS] mDNS falló, reintentando en 5s...\r\n", 38);
+                    vTaskDelay(pdMS_TO_TICKS(5000));
+                    // Podrías reintentar o guardar error, pero asumamos que el broker está
+                }
+                mdns_free();  // ya no necesitamos el cliente mDNS
+            } else {
+                uart_write_bytes(UART_NUM_0, "[MDNS] mdns_init() falló\r\n", 28);
+            }
+        }
+
+
+    }
+
+    
     
     
     // Inicializar MQTT con la IP (g_broker_ip ya está llena)
@@ -922,11 +970,11 @@ void task_cmd_uart(void *params)
                 xTaskCreate(task_hx711_calibrate, "hx711_cal", 4096, &hx, 6, NULL);
             }
 
-            else if (strcmp(tokens[0], "ACK") == 0) {
+            else if (g_device_role == ROLE_MASTER && strcmp(tokens[0], "ACK") == 0) {
                 // ACK recibido desde UART1
                 xEventGroupSetBits(s_wifi_event_group, BROKER_RECEIVED);
             }
-            else if (strcmp(tokens[0], "BRK_MQTT") == 0) {
+            else if (g_device_role == ROLE_MASTER && strcmp(tokens[0], "BRK_MQTT") == 0) {
                 if (tokens[1] != NULL) {
                     strncpy(g_broker_ip, tokens[1], sizeof(g_broker_ip));
                     nvs_save_str("mqtt_broker", g_broker_ip);

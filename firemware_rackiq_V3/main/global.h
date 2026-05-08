@@ -68,6 +68,8 @@
 #include "freertos/queue.h"
 #include "driver/uart.h"
 
+
+
 #define TRUE 1
 #define FALSE 0
 
@@ -94,6 +96,15 @@
 // ─── Pines HX711 ──────────────────────────────────────────────────────────────
 #define DOUT_PIN   GPIO_NUM_4
 #define PD_SCK_PIN GPIO_NUM_5
+
+// ─── Roles de dispositivo ────────────────────────────────────────────────────
+#define ROLE_MASTER  1
+#define ROLE_SLAVE   2
+// Pin para detectar rol: HIGH = Master, LOW = Slave (ajusta según tu hardware)
+#define ROLE_PIN  GPIO_NUM_23 //el pin 23 para master estra con pullup interno y en slave estara aterrizado en tierra
+
+extern uint8_t g_device_role;
+
 
 // ─── Colas ────────────────────────────────────────────────────────────────────
 extern QueueHandle_t flow_data_queue;   // comandos desde UART0
