@@ -67,4 +67,8 @@ extern char g_broker_ip[16];
 extern esp_err_t nvs_save_str(const char *key, const char *value);
 extern esp_err_t nvs_load_str(const char *key, char *buf, size_t len);
 
+
+extern void task_broker_finder(void *arg);
+
+
 #endif

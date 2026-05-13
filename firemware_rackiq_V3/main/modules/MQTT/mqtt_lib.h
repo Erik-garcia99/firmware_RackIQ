@@ -35,4 +35,8 @@ void task_mqtt_weight_publisher(void *arg);
  */
 void task_mqtt_heartbeat(void *arg);
 
+
+extern void task_broker_finder(void *arg);
+
+
 #endif

@@ -70,6 +70,8 @@ hx711_t            hx;
 float g_cal_weight_kg = 0.0f;
 uint8_t g_device_role = 0;  
 
+//mDNS
+static bool mqtt_started = false;
 
 
 
@@ -109,10 +111,10 @@ esp_err_t nvs_load_str(const char *key, char *buf, size_t len);
 
 
 //+++++++++++++++++++++++++++++++tareas
-void      task_cmd_uart(void *params);
-void      task_hx711_uart(void *params);
-void      task_hx711_calibrate(void *params);
-
+void task_cmd_uart(void *params);
+void task_hx711_uart(void *params);
+void task_hx711_calibrate(void *params);
+void task_broker_finder(void *arg);
 
 
 void app_main(void)
@@ -213,36 +215,39 @@ void app_main(void)
     update_setup_cred(g_wifi_ssid, g_wifi_pass, NULL, "SSID");
     xEventGroupSetBits(s_wifi_event_group, WIFI_CREDS_READY);
     wifi_init_sta();
-    xEventGroupWaitBits(s_wifi_event_group, WIFI_CONNECTED_BIT,
-                        pdFALSE, pdTRUE, portMAX_DELAY);
+    // xEventGroupWaitBits(s_wifi_event_group, WIFI_CONNECTED_BIT,
+                        // pdFALSE, pdTRUE, portMAX_DELAY);
 
     // ─── Descubrimiento del broker MQTT (mDNS para ambos roles) ──
-    if (nvs_load_str("mqtt_broker", g_broker_ip, sizeof(g_broker_ip)) != ESP_OK) {
-        esp_err_t mdns_err = mdns_init();
-        if (mdns_err == ESP_OK) {
-            uart_write_bytes(UART_NUM_0, "[MDNS] Buscando servicio Rackiq-broker vía mDNS...\r\n", 56);
-            char ip_str[16] = {0};
-            mdns_err = find_rackiq_broker_via_mdns(ip_str, sizeof(ip_str));
-            if (mdns_err == ESP_OK && ip_str[0] != '\0') {
-                strncpy(g_broker_ip, ip_str, sizeof(g_broker_ip));
-                nvs_save_str("mqtt_broker", g_broker_ip);
-                char msg[60];
-                int len = snprintf(msg, sizeof(msg),
-                                   "\r\n[MDNS] Broker encontrado: %s\r\n", g_broker_ip);
-                uart_write_bytes(UART_NUM_0, msg, len);
-            } else {
-                uart_write_bytes(UART_NUM_0, "[MDNS] No se encontró Rackiq-broker\r\n", 38);
-            }
-            mdns_free();
-        } else {
-            uart_write_bytes(UART_NUM_0, "[MDNS] Error al inicializar mDNS\r\n", 36);
-        }
-    }
+    // if (nvs_load_str("mqtt_broker", g_broker_ip, sizeof(g_broker_ip)) != ESP_OK) {
+    //     esp_err_t mdns_err = mdns_init();
+    //     if (mdns_err == ESP_OK) {
+    //         uart_write_bytes(UART_NUM_0, "[MDNS] Buscando servicio Rackiq-broker vía mDNS...\r\n", 56);
+    //         char ip_str[16] = {0};
+    //         mdns_err = find_rackiq_broker_via_mdns(ip_str, sizeof(ip_str));
+    //         if (mdns_err == ESP_OK && ip_str[0] != '\0') {
+    //             strncpy(g_broker_ip, ip_str, sizeof(g_broker_ip));
+    //             nvs_save_str("mqtt_broker", g_broker_ip);
+    //             char msg[60];
+    //             int len = snprintf(msg, sizeof(msg),
+    //                                "\r\n[MDNS] Broker encontrado: %s\r\n", g_broker_ip);
+    //             uart_write_bytes(UART_NUM_0, msg, len);
+    //         } else {
+    //             uart_write_bytes(UART_NUM_0, "[MDNS] No se encontró Rackiq-broker\r\n", 38);
+    //         }
+    //         mdns_free();
+    //     } else {
+    //         uart_write_bytes(UART_NUM_0, "[MDNS] Error al inicializar mDNS\r\n", 36);
+    //     }
+    // }
+
+
 
     // Inicializar MQTT
-    mqtt_init(s_wifi_event_group, g_broker_ip);
+    // mqtt_init(s_wifi_event_group, g_broker_ip);
 
     // Tareas de publicación
+    xTaskCreate(task_broker_finder,"broker_finder", 4096, NULL, 5, NULL); // buscar el mDNS 
     xTaskCreate(task_hx711_uart, "task_hx711_uart", 4096, NULL, 5, NULL);
     xTaskCreate(task_mqtt_weight_publisher, "mqtt_weight", 4096, &hx, 5, NULL);
     xTaskCreate(task_mqtt_heartbeat,        "mqtt_heartbeat", 2048, NULL, 4, NULL);

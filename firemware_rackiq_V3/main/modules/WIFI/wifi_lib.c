@@ -58,12 +58,13 @@ void wifi_init_sta(void){
         ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &wifi_event_handler, NULL, &instance_any_id));
         ESP_ERROR_CHECK(esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &wifi_event_handler, NULL, &instance_got_ip));
 
-        ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
-        ESP_ERROR_CHECK(esp_wifi_start()); 
+        
         
         wifi_initialized = true; // Ya no volverá a entrar aquí en las reconexiones
     }
-
+    
+    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
+    ESP_ERROR_CHECK(esp_wifi_start()); 
     // 2. Bucle de conexión a la red
     EventBits_t bits;
     
@@ -215,7 +216,7 @@ void wifi_init_ap(void)
 void wifi_stop_ap(void)
 {
     esp_wifi_stop();
-    esp_wifi_deinit();
+    // esp_wifi_deinit();
     // Recrear netif para STA posteriormente? 
     // En wifi_init_sta ya lo hace, así que no hay problema.
 }
