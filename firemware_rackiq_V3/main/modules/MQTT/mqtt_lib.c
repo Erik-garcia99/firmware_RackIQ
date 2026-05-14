@@ -75,11 +75,66 @@ static void mqtt_event_handler(void *arg, esp_event_base_t base,
                      "%02X:%02X:%02X:%02X:%02X:%02X:ACK",
                      mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
             esp_mqtt_client_publish(mqtt_client, "Rackiq/broker", payload, 0, 1, 0);
+
+            esp_mqtt_client_subscribe(mqtt_client, "rackiq/shelf/+/calibrate/tare", 1);
+            esp_mqtt_client_subscribe(mqtt_client, "rackiq/shelf/+/calibrate/scale", 1);
+
             break;
         }
         case MQTT_EVENT_DISCONNECTED:
             ESP_LOGW(TAG, "Desconectado del broker");
             break;
+
+        case MQTT_EVENT_DATA: {
+            esp_mqtt_event_handle_t event = (esp_mqtt_event_handle_t)event_data;
+            char topic[128];
+            char data[64];
+            strncpy(topic, event->topic, event->topic_len);
+            topic[event->topic_len] = '\0';
+            strncpy(data, event->data, event->data_len);
+            data[event->data_len] = '\0';
+
+            // Extraer mqtt_id del topic (rackiq/shelf/[mqtt_id]/calibrate/...)
+            char mqtt_id[32] = {0};
+            if (sscanf(topic, "rackiq/shelf/%[^/]/calibrate/tare", mqtt_id) == 1) {
+                // Comando TARE
+                extern hx711_t hx;
+                hx711_suspend_task(&hx);
+                hx711_tare(&hx, 20);
+                hx711_resume_task(&hx);
+                // Publicar resultado
+                char resp_topic[64] = "rackiq/calibration/result";
+                char resp_payload[128];
+                snprintf(resp_payload, sizeof(resp_payload), 
+                        "{\"mqtt_id\":\"%s\",\"status\":\"tare_done\",\"offset\":%ld}", 
+                        mqtt_id, hx.offset);
+                esp_mqtt_client_publish(mqtt_client, resp_topic, resp_payload, 0, 1, 0);
+                ESP_LOGI(TAG, "Tare completada para %s", mqtt_id);
+            }
+            else if (sscanf(topic, "rackiq/shelf/%[^/]/calibrate/scale", mqtt_id) == 1) {
+                // Comando SCALE
+                float ref_weight = 0;
+                if (sscanf(data, "{\"weight\":%f}", &ref_weight) == 1 && ref_weight > 0) {
+                    extern hx711_t hx;
+                    hx711_suspend_task(&hx);
+                    int32_t raw = hx711_read_average(&hx, 20);
+                    float new_scale = (raw - hx.offset) / ref_weight;
+                    hx711_set_scale(&hx, new_scale);
+                    hx711_save_calibration(&hx);
+                    hx711_resume_task(&hx);
+                    char resp_payload[256];
+                    snprintf(resp_payload, sizeof(resp_payload),
+                            "{\"mqtt_id\":\"%s\",\"status\":\"scale_done\",\"new_scale\":%.4f,\"offset\":%ld}",
+                            mqtt_id, new_scale, hx.offset);
+                    esp_mqtt_client_publish(mqtt_client, "rackiq/calibration/result", resp_payload, 0, 1, 0);
+                    ESP_LOGI(TAG, "Calibración completada para %s, nueva escala: %.4f", mqtt_id, new_scale);
+                } else {
+                    ESP_LOGW(TAG, "Peso de referencia inválido para %s: %s", mqtt_id, data);
+                }
+            }
+            break;
+        }
+        
         default:
             break;
     }
@@ -89,10 +144,10 @@ static void set_shelf_id_from_mac(void)
 {
     uint8_t mac[6];
     esp_efuse_mac_get_default(mac);
-    snprintf(shelf_id, sizeof(shelf_id), "%02x%02x%02x",
-             mac[3], mac[4], mac[5]);
+    // Usar últimos 3 bytes de la MAC (6 caracteres hex)
+    snprintf(shelf_id, sizeof(shelf_id), "%02x%02x%02x", mac[3], mac[4], mac[5]);
+    ESP_LOGI(TAG, "mqtt_id generado: %s", shelf_id);
 }
-
 
 
 void task_mqtt_weight_publisher(void *arg)
@@ -180,6 +235,8 @@ void task_broker_finder(void *arg)
         bool found = false;
         if (g_broker_ip[0] != '\0') {
             found = true;
+            uart_write_bytes(UART_NUM_0,
+                "[BROKER] Usando IP guardada en NVS\r\n", 38);
             ESP_LOGI(TAG, "Usando broker IP de NVS/memoria: %s", g_broker_ip);
         }
 
@@ -198,28 +255,39 @@ void task_broker_finder(void *arg)
                     nvs_save_str("mqtt_broker", g_broker_ip);
                     char msg[64];
                     snprintf(msg, sizeof(msg),
-                             "[BROKER] Encontrado: %s\r\n", g_broker_ip);
+                             "[BROKER] Encontrado via mDNS: %s\r\n", g_broker_ip);
                     uart_write_bytes(UART_NUM_0, msg, strlen(msg));
                     found = true;
                 } else {
                     uart_write_bytes(UART_NUM_0,
-                        "[BROKER] No encontrado. Reintentando en 60s...\r\n", 48);
+                        "[BROKER] No encontrado via mDNS. Reintentando en 30s...\r\n", 60);
                 }
+            } else {
+                uart_write_bytes(UART_NUM_0,
+                    "[BROKER] mDNS init falló. Reintentando en 30s...\r\n", 52);
             }
         }
 
         // 3. Si tenemos IP, iniciar MQTT
         if (found && g_broker_ip[0] != '\0') {
+            char msg[80];
+            snprintf(msg, sizeof(msg),
+                     "[BROKER] Conectando a MQTT en %s:1883...\r\n", g_broker_ip);
+            uart_write_bytes(UART_NUM_0, msg, strlen(msg));
+            
             if (mqtt_init(s_wifi_event_group, g_broker_ip) == ESP_OK) {
                 uart_write_bytes(UART_NUM_0,
-                    "[BROKER] MQTT iniciado.\r\n", 25);
-                vTaskDelete(NULL);  // trabajo terminado
+                    "[BROKER] ✓ MQTT iniciado\r\n", 27);
+                vTaskDelete(NULL);
                 return;
+            } else {
+                uart_write_bytes(UART_NUM_0,
+                    "[BROKER] Error al iniciar MQTT. Reintentando en 30s...\r\n", 58);
             }
         }
 
-        // Esperar 1 minuto antes del siguiente intento
-        vTaskDelay(pdMS_TO_TICKS(60000));
+        // Esperar 30 segundos antes del siguiente intento
+        vTaskDelay(pdMS_TO_TICKS(30000));
     }
 }
 
@@ -228,9 +296,37 @@ void task_broker_finder(void *arg)
 
 esp_err_t find_rackiq_broker_via_mdns(char *broker_ip, size_t ip_len)
 {
+    // Primero, intentar resolver el hostname de la RPI por DNS (raspberrypi.local o rasberry-dmrx.local)
+    const char *rpi_hostnames[] = {
+        "rasberry-dmrx.local",
+        "raspberrypi.local",
+        "rackiq-gateway.local"
+    };
+    
+    esp_ip4_addr_t addr;
+    
+    for (int i = 0; i < sizeof(rpi_hostnames) / sizeof(rpi_hostnames[0]); i++) {
+        uart_write_bytes(UART_NUM_0, 
+            "[BROKER] Resolviendo hostname ", 30);
+        uart_write_bytes(UART_NUM_0, (uint8_t*)rpi_hostnames[i], strlen(rpi_hostnames[i]));
+        uart_write_bytes(UART_NUM_0, "...\r\n", 5);
+        
+        esp_err_t err = mdns_query_a(rpi_hostnames[i], 3000, &addr);
+        if (err == ESP_OK && addr.addr != 0) {
+            snprintf(broker_ip, ip_len, IPSTR, IP2STR(&addr));
+            char msg[64];
+            snprintf(msg, sizeof(msg), "[BROKER] ✓ Resolvió a: %s\r\n", broker_ip);
+            uart_write_bytes(UART_NUM_0, (uint8_t*)msg, strlen(msg));
+            return ESP_OK;
+        }
+    }
+    
+    // Si no se resuelven hostnames, intentar buscar por servicio mDNS _http._tcp
     mdns_result_t *results = NULL;
     esp_err_t err = mdns_query_srv("Rackiq-broker", "_http", "_tcp", 3000, &results);
     if (err != ESP_OK || results == NULL) {
+        uart_write_bytes(UART_NUM_0,
+            "[BROKER] No encontrado por hostname ni por servicio\r\n", 55);
         return ESP_FAIL;
     }
 
@@ -238,7 +334,6 @@ esp_err_t find_rackiq_broker_via_mdns(char *broker_ip, size_t ip_len)
     for (mdns_result_t *r = results; r != NULL; r = r->next) {
         if (r->instance_name && strcasecmp(r->instance_name, "Rackiq-broker") == 0) {
             if (r->hostname) {
-                esp_ip4_addr_t addr;
                 err = mdns_query_a(r->hostname, 3000, &addr);
                 if (err == ESP_OK && addr.addr != 0) {
                     snprintf(broker_ip, ip_len, IPSTR, IP2STR(&addr));

@@ -26,6 +26,7 @@ static const char *HTML_FORM = "<!DOCTYPE html><html>"
 static esp_err_t root_get_handler(httpd_req_t *req)
 {
     httpd_resp_send(req, HTML_FORM, strlen(HTML_FORM));
+    
     return ESP_OK;
 }
 
@@ -78,6 +79,8 @@ static esp_err_t save_post_handler(httpd_req_t *req)
     // Enviar respuesta al navegador
     const char *resp = "<h1>Credenciales guardadas.</h1><p>El ESP se conectará a la red WiFi.</p>";
     httpd_resp_send(req, resp, strlen(resp));
+    vTaskDelay(pdMS_TO_TICKS(500));   // Asegura que el navegador reciba la respuesta
+    esp_restart();
     return ESP_OK;
 }
 
