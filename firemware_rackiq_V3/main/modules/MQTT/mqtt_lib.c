@@ -149,6 +149,64 @@ static void set_shelf_id_from_mac(void)
     ESP_LOGI(TAG, "mqtt_id generado: %s", shelf_id);
 }
 
+// En mqtt_lib.c — agregar después de set_shelf_id_from_mac()
+
+static bool hx711_pin_has_sensor(gpio_num_t dout_pin) {
+    // Configurar pin como input y ver si el HX711 baja la línea
+    gpio_set_direction(dout_pin, GPIO_MODE_INPUT);
+    gpio_set_pull_mode(dout_pin, GPIO_PULLUP_ONLY);
+    vTaskDelay(pdMS_TO_TICKS(50));
+    // Si el pin está en LOW el HX711 está listo (no flotando)
+    return gpio_get_level(dout_pin) == 0;
+}
+
+void task_mqtt_pin_status_publisher(void *arg) {
+    char topic[64];
+    char payload[128];
+    TickType_t last_wake = xTaskGetTickCount();
+    const TickType_t period = pdMS_TO_TICKS(60000); // cada 60s
+
+    if (shelf_id[0] == '\0') set_shelf_id_from_mac();
+
+    // Los 5 pines DOUT definidos en global.h
+    const gpio_num_t dout_pins[] = {
+        DOUT_PIN,      // GPIO 4
+        DOUT_HX711_2,  // GPIO 22
+        DOUT_HX711_3,  // GPIO 23
+        DOUT_HX711_4,  // GPIO 12
+        DOUT_HX711_5   // GPIO 14
+    };
+    const int pin_nums[] = {4, 22, 23, 12, 14};
+    const int n_pins = 5;
+
+    while (1) {
+        if (mqtt_client == NULL) {
+            vTaskDelay(period);
+            continue;
+        }
+
+        // Construir JSON con estado real de cada pin
+        int offset = 0;
+        offset += snprintf(payload + offset, sizeof(payload) - offset, "{");
+        for (int i = 0; i < n_pins; i++) {
+            bool active = hx711_pin_has_sensor(dout_pins[i]);
+            offset += snprintf(payload + offset, sizeof(payload) - offset,
+                               "\"pin_%d\":%s%s",
+                               pin_nums[i],
+                               active ? "true" : "false",
+                               i < n_pins - 1 ? "," : "");
+        }
+        snprintf(payload + offset, sizeof(payload) - offset, "}");
+
+        snprintf(topic, sizeof(topic), "rackiq/shelf/%s/pin_status", shelf_id);
+        esp_mqtt_client_publish(mqtt_client, topic, payload, 0, 1, 0);
+        ESP_LOGI(TAG, "pin_status publicado: %s", payload);
+
+        vTaskDelayUntil(&last_wake, period);
+    }
+}
+
+
 
 void task_mqtt_weight_publisher(void *arg)
 {

@@ -227,6 +227,8 @@ void app_main(void)
     xTaskCreate(task_hx711_uart, "task_hx711_uart", 4096, NULL, 5, NULL);
     xTaskCreate(task_mqtt_weight_publisher, "mqtt_weight", 4096, &hx, 5, NULL);
     xTaskCreate(task_mqtt_heartbeat,        "mqtt_heartbeat", 2048, NULL, 4, NULL);
+    xTaskCreate(task_mqtt_pin_status_publisher, "pin_status", 2048, NULL, 4, NULL);
+
 }
 
 

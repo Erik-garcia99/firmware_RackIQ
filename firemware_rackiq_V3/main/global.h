@@ -31,6 +31,11 @@
 // ─── Pines HX711 ────────────────────────────────────────
 #define DOUT_PIN   GPIO_NUM_4
 #define PD_SCK_PIN GPIO_NUM_5
+#define DOUT_HX711_2 GPIO_NUM_22
+#define DOUT_HX711_3 GPIO_NUM_23
+#define DOUT_HX711_4 GPIO_NUM_12
+#define DOUT_HX711_5 GPIO_NUM_14
+
 
 // ─── Roles de dispositivo ───────────────────────────────
 #define ROLE_MASTER  1

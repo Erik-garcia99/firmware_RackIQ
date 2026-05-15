@@ -38,5 +38,7 @@ void task_mqtt_heartbeat(void *arg);
 
 extern void task_broker_finder(void *arg);
 
+void task_mqtt_pin_status_publisher(void *arg);
+
 
 #endif
