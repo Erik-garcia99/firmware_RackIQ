@@ -220,10 +220,7 @@ void app_main(void)
 
 
     // Inicializar MQTT
-    // mqtt_init(s_wifi_event_group, g_broker_ip);
-
-    // Tareas de publicación
-    xTaskCreate(task_broker_finder,"broker_finder", 4096, NULL, 5, NULL); // buscar el mDNS 
+    xTaskCreate(task_broker_finder,"broker_finder", 4096, NULL, 5, NULL); // buscar el mDNS y conectar 
     xTaskCreate(task_hx711_uart, "task_hx711_uart", 4096, NULL, 5, NULL);
     xTaskCreate(task_mqtt_weight_publisher, "mqtt_weight", 4096, &hx, 5, NULL);
     xTaskCreate(task_mqtt_heartbeat,        "mqtt_heartbeat", 2048, NULL, 4, NULL);

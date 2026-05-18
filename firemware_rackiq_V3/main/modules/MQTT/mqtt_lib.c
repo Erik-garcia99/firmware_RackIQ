@@ -20,7 +20,7 @@ static const char *TAG = "MQTT";
 static char broker_uri[64] = {0};
 static esp_mqtt_client_handle_t mqtt_client = NULL;
 static EventGroupHandle_t wifi_event_group = NULL;
-static char shelf_id[32] = MQTT_SHELF_ID;
+static char shelf_id[32] = {0};
 
 static bool mqtt_started = false;
 
@@ -144,20 +144,45 @@ static void set_shelf_id_from_mac(void)
 {
     uint8_t mac[6];
     esp_efuse_mac_get_default(mac);
-    // Usar últimos 3 bytes de la MAC (6 caracteres hex)
-    snprintf(shelf_id, sizeof(shelf_id), "%02x%02x%02x", mac[3], mac[4], mac[5]);
-    ESP_LOGI(TAG, "mqtt_id generado: %s", shelf_id);
+    // Usar últimos 3 bytes de la MAC (6 caracteres hex) + PIN del HX711
+    // mqtt_id = "901b98_4" (MAC + "_" + PIN number)
+    int pin_num = 4;  // DOUT_PIN = GPIO_NUM_4 = Estante 1
+    #if DOUT_PIN == GPIO_NUM_4
+        pin_num = 4;   // Estante 1
+    #elif DOUT_PIN == GPIO_NUM_22
+        pin_num = 22;  // Estante 2
+    #elif DOUT_PIN == GPIO_NUM_23
+        pin_num = 23;  // Estante 3
+    #elif DOUT_PIN == GPIO_NUM_12
+        pin_num = 12;  // Estante 4
+    #elif DOUT_PIN == GPIO_NUM_14
+        pin_num = 14;  // Estante 5
+    #endif
+    
+    snprintf(shelf_id, sizeof(shelf_id), "%02x%02x%02x_%d", mac[3], mac[4], mac[5], pin_num);
+    ESP_LOGI(TAG, "mqtt_id generado: %s (DOUT_PIN=%d)", shelf_id, DOUT_PIN);
 }
 
 // En mqtt_lib.c — agregar después de set_shelf_id_from_mac()
 
 static bool hx711_pin_has_sensor(gpio_num_t dout_pin) {
-    // Configurar pin como input y ver si el HX711 baja la línea
     gpio_set_direction(dout_pin, GPIO_MODE_INPUT);
+
+    // Prueba 1: Con resistencia Pull-Up interna
     gpio_set_pull_mode(dout_pin, GPIO_PULLUP_ONLY);
-    vTaskDelay(pdMS_TO_TICKS(50));
-    // Si el pin está en LOW el HX711 está listo (no flotando)
-    return gpio_get_level(dout_pin) == 0;
+    vTaskDelay(pdMS_TO_TICKS(5));
+    int val_up = gpio_get_level(dout_pin);
+
+    // Prueba 2: Con resistencia Pull-Down interna
+    gpio_set_pull_mode(dout_pin, GPIO_PULLDOWN_ONLY);
+    vTaskDelay(pdMS_TO_TICKS(5));
+    int val_down = gpio_get_level(dout_pin);
+
+    // Restaurar Pull-Up por seguridad para lectura normal
+    gpio_set_pull_mode(dout_pin, GPIO_PULLUP_ONLY);
+
+    // Si el valor es el mismo en ambos casos, el pin no está flotando (hay un HX711 forzando el voltaje)
+    return (val_up == val_down);
 }
 
 void task_mqtt_pin_status_publisher(void *arg) {
@@ -354,11 +379,11 @@ void task_broker_finder(void *arg)
 
 esp_err_t find_rackiq_broker_via_mdns(char *broker_ip, size_t ip_len)
 {
-    // Primero, intentar resolver el hostname de la RPI por DNS (raspberrypi.local o rasberry-dmrx.local)
+    // Primero, intentar resolver el hostname de la RPI por DNS
     const char *rpi_hostnames[] = {
-        "rasberry-dmrx.local",
-        "raspberrypi.local",
-        "rackiq-gateway.local"
+        "rasberry-dmrx",
+        "raspberrypi",
+        "rackiq-gateway"
     };
     
     esp_ip4_addr_t addr;
