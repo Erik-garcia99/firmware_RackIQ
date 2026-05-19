@@ -76,8 +76,13 @@ static void mqtt_event_handler(void *arg, esp_event_base_t base,
                      mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
             esp_mqtt_client_publish(mqtt_client, "Rackiq/broker", payload, 0, 1, 0);
 
+            ESP_LOGI(TAG, "Suscribiendo a rackiq/shelf/+/calibrate/tare");
             esp_mqtt_client_subscribe(mqtt_client, "rackiq/shelf/+/calibrate/tare", 1);
+            ESP_LOGI(TAG, "Suscrito a TARE");
+            
+            ESP_LOGI(TAG, "Suscribiendo a rackiq/shelf/+/calibrate/scale");
             esp_mqtt_client_subscribe(mqtt_client, "rackiq/shelf/+/calibrate/scale", 1);
+            ESP_LOGI(TAG, "Suscrito a SCALE");
 
             break;
         }
@@ -94,42 +99,71 @@ static void mqtt_event_handler(void *arg, esp_event_base_t base,
             strncpy(data, event->data, event->data_len);
             data[event->data_len] = '\0';
 
+            ESP_LOGI(TAG, "Mensaje MQTT recibido - Topic: %s | Data: %s", topic, data);
+
             // Extraer mqtt_id del topic (rackiq/shelf/[mqtt_id]/calibrate/...)
             char mqtt_id[32] = {0};
-            if (sscanf(topic, "rackiq/shelf/%[^/]/calibrate/tare", mqtt_id) == 1) {
-                // Comando TARE
-                extern hx711_t hx;
-                hx711_suspend_task(&hx);
-                hx711_tare(&hx, 20);
-                hx711_resume_task(&hx);
-                // Publicar resultado
-                char resp_topic[64] = "rackiq/calibration/result";
-                char resp_payload[128];
-                snprintf(resp_payload, sizeof(resp_payload), 
-                        "{\"mqtt_id\":\"%s\",\"status\":\"tare_done\",\"offset\":%ld}", 
-                        mqtt_id, hx.offset);
-                esp_mqtt_client_publish(mqtt_client, resp_topic, resp_payload, 0, 1, 0);
-                ESP_LOGI(TAG, "Tare completada para %s", mqtt_id);
-            }
-            else if (sscanf(topic, "rackiq/shelf/%[^/]/calibrate/scale", mqtt_id) == 1) {
-                // Comando SCALE
-                float ref_weight = 0;
-                if (sscanf(data, "{\"weight\":%f}", &ref_weight) == 1 && ref_weight > 0) {
+            
+            // Detectar si es tare o scale basado en el topic
+            int is_tare = (strstr(topic, "/calibrate/tare") != NULL);
+            int is_scale = (strstr(topic, "/calibrate/scale") != NULL);
+            
+            // Extraer mqtt_id del topic
+            if (sscanf(topic, "rackiq/shelf/%[^/]/calibrate/", mqtt_id) == 1) {
+                if (is_tare) {
+                    // Comando TARE
+                    ESP_LOGI(TAG, "COMANDO TARE RECIBIDO para %s", mqtt_id);
                     extern hx711_t hx;
                     hx711_suspend_task(&hx);
-                    int32_t raw = hx711_read_average(&hx, 20);
-                    float new_scale = (raw - hx.offset) / ref_weight;
-                    hx711_set_scale(&hx, new_scale);
-                    hx711_save_calibration(&hx);
+                    hx711_tare(&hx, 20);
                     hx711_resume_task(&hx);
-                    char resp_payload[256];
-                    snprintf(resp_payload, sizeof(resp_payload),
-                            "{\"mqtt_id\":\"%s\",\"status\":\"scale_done\",\"new_scale\":%.4f,\"offset\":%ld}",
-                            mqtt_id, new_scale, hx.offset);
-                    esp_mqtt_client_publish(mqtt_client, "rackiq/calibration/result", resp_payload, 0, 1, 0);
-                    ESP_LOGI(TAG, "Calibración completada para %s, nueva escala: %.4f", mqtt_id, new_scale);
-                } else {
-                    ESP_LOGW(TAG, "Peso de referencia inválido para %s: %s", mqtt_id, data);
+                    // Publicar resultado
+                    char resp_topic[64] = "rackiq/calibration/result";
+                    char resp_payload[128];
+                    snprintf(resp_payload, sizeof(resp_payload), 
+                            "{\"mqtt_id\":\"%s\",\"status\":\"tare_done\",\"offset\":%ld}", 
+                            mqtt_id, hx.offset);
+                    esp_mqtt_client_publish(mqtt_client, resp_topic, resp_payload, 0, 1, 0);
+                    ESP_LOGI(TAG, "Tare completada para %s - offset=%ld", mqtt_id, hx.offset);
+                }
+                else if (is_scale) {
+                    // Comando SCALE
+                    ESP_LOGI(TAG, "COMANDO SCALE RECIBIDO para %s - Peso ref: %s", mqtt_id, data);
+                    float ref_weight = 0;
+                    
+                    // Parsear JSON manualmente: {"weight": 0.56}
+                    char* weight_key = strstr(data, "\"weight\"");
+                    if (weight_key != NULL) {
+                        // Buscar el : después de "weight"
+                        char* colon = strchr(weight_key, ':');
+                        if (colon != NULL) {
+                            // strtof parsea desde el inicio del string numérico
+                            ref_weight = strtof(colon + 1, NULL);
+                        }
+                    }
+                    
+                    if (ref_weight > 0) {
+                        extern hx711_t hx;
+                        hx711_suspend_task(&hx);
+                        int32_t raw = hx711_read_average(&hx, 20);
+                        float new_scale = (hx.offset - raw) / ref_weight;
+                        hx711_set_scale(&hx, new_scale);
+                        hx711_save_calibration(&hx);
+                        hx711_resume_task(&hx);
+                        char resp_payload[256];
+                        snprintf(resp_payload, sizeof(resp_payload),
+                                "{\"mqtt_id\":\"%s\",\"status\":\"scale_done\",\"new_scale\":%.4f,\"offset\":%ld}",
+                                mqtt_id, new_scale, hx.offset);
+                        esp_mqtt_client_publish(mqtt_client, "rackiq/calibration/result", resp_payload, 0, 1, 0);
+                        ESP_LOGI(TAG, "Calibracion completada para %s, nueva escala: %.4f", mqtt_id, new_scale);
+                    } else {
+                        ESP_LOGW(TAG, "Peso de referencia invalido para %s: %s", mqtt_id, data);
+                        char err_payload[128];
+                        snprintf(err_payload, sizeof(err_payload),
+                                "{\"mqtt_id\":\"%s\",\"status\":\"scale_failed\",\"reason\":\"invalid_reference_weight\"}",
+                                mqtt_id);
+                        esp_mqtt_client_publish(mqtt_client, "rackiq/calibration/result", err_payload, 0, 1, 0);
+                    }
                 }
             }
             break;
@@ -279,6 +313,7 @@ void task_mqtt_weight_publisher(void *arg)
 void task_mqtt_heartbeat(void *arg)
 {
     char topic[64];
+    char payload[256];
     TickType_t last_wake_time = xTaskGetTickCount();
     const TickType_t period = pdMS_TO_TICKS(30000);
 
@@ -288,8 +323,37 @@ void task_mqtt_heartbeat(void *arg)
 
     while (1) {
         if (mqtt_client != NULL) {
+            // Detectar pines activos intentando lectura rápida
+            // Pines esperados: 4, 22, 23, 12, 14 con SCK en cada uno
+            const int pins[] = {4, 22, 23, 12, 14};
+            const int n_pins = 5;
+            
+            // Construir JSON con pines detectados
+            int offset = 0;
+            offset += snprintf(payload + offset, sizeof(payload) - offset, "{\"pins\":{");
+            
+            for (int i = 0; i < n_pins; i++) {
+                // Intento rápido de lectura: si el pin responde en <50ms, está conectado
+                gpio_set_direction(pins[i], GPIO_MODE_INPUT);
+                
+                bool pin_active = false;
+                int timeout = 50; // 50 intentos * 1ms = 50ms max
+                while (timeout-- > 0 && gpio_get_level(pins[i]) == 1) {
+                    vTaskDelay(pdMS_TO_TICKS(1));
+                }
+                pin_active = (timeout > 0); // Si bajó el nivel antes de timeout, está activo
+                
+                offset += snprintf(payload + offset, sizeof(payload) - offset,
+                                   "\"pin_%d\":%s%s",
+                                   pins[i],
+                                   pin_active ? "true" : "false",
+                                   i < n_pins - 1 ? "," : "");
+            }
+            snprintf(payload + offset, sizeof(payload) - offset, "}}");
+            
             snprintf(topic, sizeof(topic), "rackiq/shelf/%s/heartbeat", shelf_id);
-            esp_mqtt_client_publish(mqtt_client, topic, "alive", 0, 1, 0);
+            esp_mqtt_client_publish(mqtt_client, topic, payload, 0, 1, 0);
+            ESP_LOGI(TAG, "Heartbeat enviado: %s", payload);
         }
         vTaskDelayUntil(&last_wake_time, period);
     }
